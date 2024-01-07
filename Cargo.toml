@@ -12,3 +12,4 @@ futures-lite = { version = "1.11" }
 byteorder = "1.5.0"
 chrono = "0.4"
 tabled = "0.15"
+clap = {version="4.4.12", features=["derive"]}

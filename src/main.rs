@@ -1,4 +1,5 @@
 
+use clap::Parser;
 use libc::{
     socket, ETH_P_ALL, SOCK_RAW,
 };
@@ -42,7 +43,7 @@ fn ifindex_by_name(name: &str) -> Result<i32> {
 
 
 impl FDX {
-    fn new() -> Result<Self> {
+    fn new(device: &str) -> Result<Self> {
 
         // create socket
         let fd = unsafe { socket(AF_PACKET, SOCK_RAW, (ETH_P_ALL as u16).to_be() as i32) };
@@ -52,7 +53,7 @@ impl FDX {
 
 
         // bind interface
-        let ifindex = ifindex_by_name("br-lan")?;
+        let ifindex = ifindex_by_name(device)?;
         unsafe {
             let mut sll: libc::sockaddr_ll = std::mem::zeroed();
             sll.sll_family = AF_PACKET as u16;
@@ -153,8 +154,8 @@ impl<'a> AsyncRead for &'a AFDX {
 
 
 impl AFDX {
-    fn new() -> Result<Self> {
-        let fdx = FDX::new()?;
+    fn new(device: &str) -> Result<Self> {
+        let fdx = FDX::new(device)?;
         let afd = AsyncFd::new(fdx)?;
         Ok(Self{afd})
     }
@@ -209,8 +210,8 @@ fn parse(data : &Vec<u8>) -> Result<Packet>{
     })
 }
 
-async fn capture_loop() -> Result<bool>{
-    let mut afdx = AFDX::new().unwrap();
+async fn capture_loop(device: &str, macs: &Vec<String>, period: i32) -> Result<bool>{
+    let mut afdx = AFDX::new(device).unwrap();
     let mut buf = vec![0u8; 2048];
     let mut map = std::collections::HashMap::new();
     let mut time_start = SystemTime::now();
@@ -221,28 +222,51 @@ async fn capture_loop() -> Result<bool>{
         count.period += 1;
         count.total += 1;
 
-        if time_start.elapsed().unwrap().as_secs_f32() > 5.0 {
+        if time_start.elapsed().unwrap().as_secs_f32() > period as f32 {
             time_start = SystemTime::now();
             let datetime : chrono::DateTime<chrono::Local> = time_start.into();
-            println!("\n{}", datetime.to_rfc2822());
-            let mut table_builder = tabled::builder::Builder::default();
-            for i in &mut map {
-                let table_column = [mac_format(i.0), i.1.total.to_string(), i.1.period.to_string()];
-                table_builder.push_record(table_column);
-                i.1.period = 0;
+            if macs.len() == 1 {
+                let count = map.entry(parsed.eth_src).or_insert(Stat{period:0,total:0});
+                println!("{} {}", datetime.to_rfc2822(), count.period);
+                count.period = 0;
+            } else {
+                println!("\n{}", datetime.to_rfc2822());
+                let mut table_builder = tabled::builder::Builder::default();
+                for i in &mut map {
+                    let table_column = [mac_format(i.0), i.1.total.to_string(), i.1.period.to_string()];
+                    table_builder.push_record(table_column);
+                    i.1.period = 0;
+                }
+                table_builder.insert_record(0, ["src", "total", "period"]);
+                let mut table = table_builder.build();
+                table.with(tabled::settings::Style::modern());
+                println!("{}", table.to_string())
             }
-            table_builder.insert_record(0, ["src", "total", "period"]);
-            let mut table = table_builder.build();
-            table.with(tabled::settings::Style::modern());
-            println!("{}", table.to_string())
         }
     }
 }
 
+
+
+#[derive(clap::Parser)]
+#[command()] 
+struct Args {
+    device: String,
+
+    #[arg(short, long)]
+    mac: Vec<String>,
+
+    #[arg(short, long)]
+    period: i32,
+}      
+
 fn main() {
+    let args = Args::parse();
+    println!("{:?}", args.mac);
+
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    println!("prepare to capture...");
+    println!("prepare to capture [device:{}]", args.device);
     runtime.block_on( async  {
-        capture_loop().await.unwrap()
+        capture_loop(&args.device, &args.mac, args.period).await.unwrap()
     });
 }
