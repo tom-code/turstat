@@ -1,6 +1,8 @@
 
-collect simple custom stats on my openwrt based router(turris omnia with armv7 cpu)
-binary is cross-compiled on mac using following procedure:
+Collect simple custom stats on my openwrt based router(turris omnia with armv7 cpu)
+
+
+Binary is cross-compiled on mac using following procedure:
 
 
 prepare environment:
